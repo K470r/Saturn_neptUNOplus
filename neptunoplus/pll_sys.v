@@ -13,15 +13,17 @@
 //    1. In Quartus, Tools > IP Catalog > Basic Functions > Clocks; PLLs and
 //       Resets > PLL > ALTPLL.
 //    2. Input:  CLOCK_50, 50 MHz.
-//    3. Output c0 (clk_sys): 53.748200 MHz (NTSC/normal-dotclock rate;
-//       see docs/NEPTUNOPLUS_PORT.md for the other 3 rates MiSTer's
+//    3. Output c0 (clk_sys): 53.748200 MHz, 0 deg phase (NTSC/normal-dotclock
+//       rate; see docs/NEPTUNOPLUS_PORT.md for the other 3 rates MiSTer's
 //       reconfigurable PLL switches between, needed for a later milestone).
-//    4. Output c1 (clk_ram): same frequency, phase-advanced for SDRAM
-//       setup/hold (match the phase MiSTer's own pll.v uses for its
-//       outclk_1 relative to outclk_0, e.g. by inspecting that IP's
-//       generated .v in Quartus's "View Report" or regenerating from the
-//       same .qsys/.ip source if present).
-//    5. Name the variation file "pll_sys" (module name must stay pll_sys)
+//    4. Output c1 (clk_ram): 107.496400 MHz (exactly 2x c0), -60 deg phase.
+//       This exact ratio/phase is copied from the repo's own MiSTer pll.v
+//       (its default outclk_1 = 2x outclk_0 at -60 deg before runtime
+//       reconfig kicks in) - grep pll.v for "gui_output_clock_frequency1"
+//       and "gui_phase_shift_deg1" to see it yourself.
+//    5. Uncheck "Create an 'areset' input" (not used here) and leave
+//       "Create 'locked' output" checked.
+//    6. Name the variation file "pll_sys" (module name must stay pll_sys)
 //       and generate both the .v and .qip, overwriting this file and
 //       pll_sys.qip.
 // ============================================================================

@@ -122,12 +122,22 @@ posterior (necesitaría o 4 PLLs fijos + conmutación de reloj con
 
 **Acción pendiente para ti:** `neptunoplus/pll_sys.v` es un **placeholder
 que no genera reloj de verdad** (a propósito: `locked` queda en 0 para que
-sea imposible no darse cuenta de que falta este paso). Tienes que abrirlo en
-Quartus (IP Catalog → PLL → ALTPLL) y generarlo con: entrada 50 MHz,
-`c0`=53.748200 MHz, `c1`=misma frecuencia con la fase que use el `pll.v`
-original de MiSTer para su `outclk_1` respecto a `outclk_0` (ábrelo para
-copiar ese desfase). No se puede generar este IP sin Quartus - por eso no
-venía ya resuelto.
+sea imposible no darse cuenta de que falta este paso). Hay que regenerarlo en
+Quartus (ALTPLL). Los valores exactos, sacados del propio `pll.v` de MiSTer
+de este repo (`gui_reference_clock_frequency`/`gui_output_clock_frequency0`/
+`gui_output_clock_frequency1`/`gui_phase_shift_deg1`):
+
+- entrada (`inclk0`): 50 MHz
+- `c0` (`clk_sys`): 53.748200 MHz, fase 0°
+- `c1` (`clk_ram`, alimenta `SDRAM_CLK`): **107.496400 MHz (el doble exacto
+  de c0)**, fase **-60°**
+
+Ese `c1` = 2×c0 con -60° es tal cual el que usa `pll.v` para su `outclk_1`
+(107.38635 MHz = 2×53.693175 MHz, -60°, antes de que el reconfig en caliente
+cambie de frecuencia) - `sdram1.sv` necesita ese reloj al doble de frecuencia
+para caber varias fases de acceso a SDRAM por cada ciclo de `clk_sys`. Ver el
+mensaje de la sesión donde se guio la regeneración paso a paso en Quartus
+para el detalle completo del asistente ALTPLL.
 
 ### 3. `CONF_STR` había que reescribirlo a la sintaxis clásica de MiST
 
