@@ -1,6 +1,8 @@
-# Core RTL shared verbatim with the MiSTer build (same list as the repo
-# root's files.qip, minus its last two lines: Saturn.sv / Saturn.sdc are the
-# MiSTer-only top level, replaced here by Saturn_MiST.sv + neptuno2_top.sv).
+# All non-.qsf source references for this project in one place: the core
+# RTL shared verbatim with the MiSTer build (same list as the repo root's
+# files.qip, minus its last two lines - Saturn.sv/Saturn.sdc are the
+# MiSTer-only top level, replaced here), plus the neptUNO+-specific top
+# level, the vendored MiST framework, the PLL IP, and the SDC.
 set_global_assignment -name QIP_FILE ../rtl/FX68K/fx68k.qip
 set_global_assignment -name QIP_FILE ../rtl/SH/SH7604/SH7604.qip
 set_global_assignment -name QIP_FILE ../rtl/SH/SH7034/SH7034.qip
@@ -24,3 +26,9 @@ set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/lightgun.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/cofi.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/jtframe_resync.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/hps2cdd.sv
+set_global_assignment -name VERILOG_FILE build_id.v
+set_global_assignment -name SYSTEMVERILOG_FILE neptuno2_top.sv
+set_global_assignment -name SYSTEMVERILOG_FILE Saturn_MiST.sv
+set_global_assignment -name QIP_FILE "../mist-modules/mist.qip"
+set_global_assignment -name QIP_FILE pll_sys.qip
+set_global_assignment -name SDC_FILE Saturn_neptunoplus.sdc
