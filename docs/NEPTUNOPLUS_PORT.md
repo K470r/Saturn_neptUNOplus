@@ -219,7 +219,7 @@ periféricos (`hps2pad.sv`, `ps2mouse.sv`, `ps2keyboard.sv`, `lightgun.sv`,
 - **M4**: pads avanzados (Mission Stick/3D Pad/Mouse/Teclado/Lightgun),
   mando 2, SDRAM2/expansión de 64MB para volver al modo dual-SDRAM completo.
 
-## Actualización: `ddram.sv` necesita un puente SDRAM propio (hallazgo grave)
+## `ddram.sv` (hallazgo grave, ya resuelto): necesitaba un puente SDRAM propio
 
 Al compilar por primera vez en Quartus salió un bloque de errores en la
 instancia `ddram ddram (.*, ...)` dentro del bloque de cableado copiado tal
@@ -238,71 +238,75 @@ frente a las ventanas de dirección mucho mayores que expone `ddram.sv`), así
 que el problema no es de capacidad sino de que hace falta **un controlador
 SDRAM nuevo detrás de esos mismos puertos Avalon**, sin tocar `ddram.sv`.
 
-### Solución en curso: puente Avalon→SDRAM en el chip de expansión
+### Primer intento (descartado): dominio de reloj separado con CDC
 
-En paralelo (otra sesión de Claude, en la máquina del usuario) ya se avanzó
-bastante en esto:
+En paralelo, otra sesión de Claude en la máquina del usuario avanzó un
+puente Avalon→SDRAM (`avalon_sdram_bridge.sv` + `sdram2_ctrl.sv`, basado en
+el controlador clásico de Sorgelig) para el chip de expansión, con un fix
+real y bien encontrado: la salida `ready` de `sdram2_ctrl` sube varios
+ciclos *antes* de que la FSM vuelva de verdad a `STATE_IDLE` (el único
+estado donde atiende un comando nuevo) - si el puente solo esperaba
+`ready`, el pulso de lectura/escritura siguiente de una ráfaga se perdía en
+silencio. Se añadió una señal `idle` (alta solo en `STATE_IDLE` real) y el
+puente espera `ready && idle` antes de mandar la siguiente sub-palabra -
+esto resolvió una corrupción de BIOS real que se veía antes.
 
-- `neptunoplus/avalon_sdram_bridge.sv`: adaptador Avalon-MM (`av_*`, mismo
-  shape que los puertos `DDRAM_*` de `ddram.sv`) → protocolo simple de
-  `sdram2_ctrl.sv` (`sd_*`). Maneja ráfagas de 4 palabras de 16 bits para
-  formar las palabras de 64 bits que espera `ddram.sv`.
-- `neptunoplus/sdram2_ctrl.sv` (módulo `sdram`, basado en el controlador
-  clásico de Sorgelig usado en muchos cores MiSTer/MiST): controla el chip
-  físico de expansión (64MB, vía conector de borde). Ya tiene un fix real
-  encontrado y validado en simulación: la salida `ready` sube varios ciclos
-  *antes* de que la FSM vuelva de verdad a `STATE_IDLE` (el único estado
-  donde atiende un comando nuevo) - si el puente solo esperaba `ready`, el
-  pulso de lectura/escritura siguiente de una ráfaga se perdía en silencio.
-  Se añadió una señal `idle` (alta solo en `STATE_IDLE` real) y el puente
-  espera `ready && idle` antes de mandar la siguiente sub-palabra. Este es
-  el fix que resolvió la corrupción de BIOS que se veía antes.
-- Reparto de chips confirmado con el usuario: **`sdram1.sv` (chip de a
-  bordo) se queda igual**, sirviendo VDP2 RAM A/B + SCSP RAM. **El chip de
-  expansión (64MB, conector de borde)** sirve todo lo que hoy pasa por
-  `ddram.sv` a través de este puente nuevo.
-- Pines `SDRAM2_*` ya cableados en `neptuno2_top.sv` y `Saturn_neptunoplus.qsf`
-  (pinout idéntico al de `delgrom/NeoGeo_FPGA`'s
-  `neptunoplus/NeoGeo_neptunoplus_dr.qsf` - variante "dual RAM" del mismo
-  target, ya probada en placa real). Por ahora quedan en estado inactivo
-  (sin conectar a nada del núcleo) hasta terminar la integración.
-- PLL de 3 salidas en vez de 2: `c0`=`clk_sys` (53.748200MHz, 0°, sin
-  cambios), `c1`=`clk_ram` (107.496400MHz, -60°, alimenta `sdram1.sv`, sin
-  cambios), `c2`=`clk_ram2` **dedicado** (misma frecuencia, +150°/+3880ps,
-  alimenta toda la cadena `ddram_inst`+puente+`sdram2_ctrl`). Mismo patrón
-  que usa `NeoGeo_MiST.sv`/`pll2_mist.v` en este mismo hardware (confirmado
-  matemáticamente: su desfase real da exactamente 150° también). `ddram_inst`
-  vive en el dominio `clk_ram` (junto con el resto del sistema) y cruza a
-  `clk_ram2` mediante un handshake `req`/`ack` con sincronizadores de 2
-  flip-flops en la frontera - **replicado tal cual del patrón de NeoGeo**.
-  ⚠️ La primera regeneración del PLL de 3 salidas se hizo con `c0` mal
-  calibrado (53.693180MHz en vez de 53.748200MHz - valor "de arranque" del
-  `pll.v` original de MiSTer antes de su reconfig en caliente, no el valor
-  final real); pendiente de regenerar con `c0` corregido.
-- **Instrumentación de depuración real en hardware**: un módulo
-  `debug_uart` propio (no compartido en este repo todavía) transmite por
-  `UART_TX` (`PIN_B19`) el estado de reset/actividad de bus del CPU cada
-  ~250ms. Es la herramienta que permitió encontrar el hallazgo más
-  importante de la investigación en curso: **el CPU sale del reset
-  correctamente pero se cuelga permanentemente en su primer acceso a
-  memoria, dirección `0x000000`** (el vector de reset/arranque de BIOS).
-  Sospechoso principal: el handshake `req`/`ack` de 2FF entre `clk_ram` y
-  `clk_ram2` - si es un pulso de un solo ciclo sin reintento, un
-  sincronizador simple puede perderlo por completo dependiendo de la
-  relación de fase exacta entre ambos relojes en ese instante, lo cual
-  encaja con un cuelgue permanente y determinístico justo en el primer
-  acceso. Sin confirmar todavía - pendiente de revisar el código real del
-  sincronizador (no compartido aún en este repo).
+Pero esa sesión metió todo el puente + `sdram2_ctrl` en un dominio de reloj
+`clk_ram2` **separado** de `clk_ram` (misma frecuencia, fase +150°, 3ª
+salida de PLL), cruzando con un handshake `req`/`ack` de 2 flip-flops -
+copiando (mal interpretado) el patrón de `NeoGeo_MiST.sv`. Con
+instrumentación real en hardware (un `debug_uart` propio por `UART_TX`) se
+encontró que el CPU sale del reset correctamente pero se cuelga
+**permanentemente** en su primer acceso a memoria, dirección `0x000000`.
 
-### Pendiente para completar esto
+Analizando esto en esta sesión: ese cuelgue determinista (siempre el mismo
+punto) es la firma clásica de un CDC roto - un `req`/`ack` de un solo ciclo
+sin reintento se pierde por completo si un sincronizador de 2FF no lo ve a
+tiempo, y como la relación de fase entre `clk_ram`/`clk_ram2` es fija, el
+resultado es 100% reproducible. Y revisando `sdram2_ctrl.sv` de nuevo: su
+`SDRAM_CLK` de salida ya lo genera internamente vía un registro de salida
+DDR (`altddio_out`) - **no necesita que el reloj de entrada ya venga
+desfasado**, esa técnica es la misma que usa este controlador (el clásico
+de Sorgelig) en muchos otros cores sin depender nunca de un reloj especial.
+No había ninguna razón real para el segundo dominio de reloj.
 
-1. Regenerar el PLL de 3 salidas con `c0` corregido (53.748200MHz).
-2. Traer al repo: el `debug_uart.sv` real, el top-level con `ddram_inst` +
-   el puente + `sdram2_ctrl` + los sincronizadores `req`/`ack` de 2FF ya
-   instanciados juntos (hoy solo están los ficheros sueltos del puente y el
-   controlador, sin la integración final ni el fix del cuelgue en
-   `0x000000`).
-3. Revisar el sincronizador CDC como sospechoso principal del cuelgue.
-4. Compilar, y entonces actualizar `files_core.qip` para incluir
-   `avalon_sdram_bridge.sv`/`sdram2_ctrl.sv` (hoy deliberadamente fuera del
-   `.qip`, para no intentar compilar una integración todavía incompleta).
+### Solución adoptada: todo en el mismo `clk_ram`, sin CDC
+
+Se descartó `clk_ram2` por completo. `avalon_sdram_bridge` y `sdram2_ctrl`
+corren sobre el mismo `clk_ram` que ya usa `ddram.sv` (y `sdram1.sv`) -
+cero cruces de reloj, cero sincronizadores, cero forma de perder un pulso
+por CDC. `sdram2_ctrl` resuelve la fase física de `SDRAM2_CLK` por su
+cuenta vía `altddio_out`, igual que antes.
+
+Reparto de chips confirmado con el usuario: **`sdram1.sv` (chip de a bordo)
+se queda igual**, sirviendo VDP2 RAM A/B + SCSP RAM sin tocar. **El chip de
+expansión (64MB, conector de borde)** sirve todo lo que pasa por
+`ddram.sv` (RAMH, VDP1 VRAM/FB, CD RAM/buffer, cartucho, BIOS, Backup RAM)
+a través del puente.
+
+Estado: **integrado y en `files_core.qip`**. En `Saturn_MiST.sv`:
+`ddram.sv` (sin tocar) sigue vinculando sus puertos `DDRAM_*` vía `.*`;
+ahora hay wires `DDRAM_*` declarados que ese `.*` recoge automáticamente, y
+`avalon_sdram_bridge`/`sdram2_ctrl` (renombrados `DDRAM_*`↔`av_*` en la
+propia instancia) los respaldan, ambos sobre `clk_ram` y reiniciados con
+`reset||rst_ram` (el puente, misma condición que usa `ddram.sv`) y
+`rst_ram` solo (`sdram2_ctrl`, misma condición que usa `sdram1.sv` para su
+`init` - un reset simple no debería forzar una re-inicialización completa
+del chip físico, que tarda ~100us). Refresh: contador libre de 9 bits,
+alterna cada 256 ciclos de `clk_ram` (~2.4us a 107.5MHz) - conservador
+(más seguido de lo estrictamente necesario) pero no incorrecto. Pines
+`SDRAM2_*` cableados de extremo a extremo (`neptuno2_top.sv` →
+`Saturn_MiST.sv`), con el pinout de `NeoGeo_neptunoplus_dr.qsf`.
+
+Sin verificar en Quartus todavía (no hay toolchain en esta sesión) - el
+siguiente paso natural es compilar.
+
+### Pendiente
+
+1. Compilar en Quartus y resolver lo que salga - primera vez que se
+   compila esta integración.
+2. `debug_uart` sigue sin traerse a este repo (vive en la otra máquina del
+   usuario) - hace falta para depurar en hardware real cuando llegue el
+   momento; dado que el cuelgue en `0x000000` era específico del diseño con
+   CDC ya descartado, hay que confirmar desde cero si el problema
+   desaparece con este diseño más simple.

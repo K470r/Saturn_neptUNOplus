@@ -41,6 +41,22 @@ module Saturn_MiST
 	output        SDRAM_CLK,
 	output        SDRAM_CKE,
 
+	// SDRAM interface, expansion chip (edge connector). Backs everything
+	// rtl/ddram.sv used to route to MiSTer's DDR3 (RAMH, VDP1 VRAM/FB,
+	// CD RAM/buffer, cart, BIOS, Backup RAM) via avalon_sdram_bridge.sv +
+	// sdram2_ctrl.sv below - see docs/NEPTUNOPLUS_PORT.md.
+	inout  [15:0] SDRAM2_DQ,
+	output [12:0] SDRAM2_A,
+	output        SDRAM2_DQML,
+	output        SDRAM2_DQMH,
+	output        SDRAM2_nWE,
+	output        SDRAM2_nCAS,
+	output        SDRAM2_nRAS,
+	output        SDRAM2_nCS,
+	output  [1:0] SDRAM2_BA,
+	output        SDRAM2_CLK,
+	output        SDRAM2_CKE,
+
 	// SPI interface to the RP2040 (MiST protocol)
 	inout         SPI_DO,
 	input         SPI_DI,
@@ -1867,6 +1883,107 @@ assign SDRAM_CLK = clk_ram;
 	reg          DBG_RUN = 0;
 	
 	reg  [ 7: 0] DBG_EXT = '0;
+
+/////////////////////////  EXPANSION SDRAM (ddram.sv backing store)  ////////
+// rtl/ddram.sv (from files_core.qip, unmodified) drives DDRAM_CLK/BUSY/
+// BURSTCNT/ADDR/DOUT/DOUT_READY/RD/DIN/BE/WE via the `.*` port binding on
+// its instantiation above. MiSTer's own top level wires those to physical
+// DDR3 pins; this board has no DDR3, so they're bridged to the expansion
+// SDRAM chip (edge connector) instead.
+//
+// Deliberately on the SAME clk_ram domain as ddram.sv itself (and
+// sdram1.sv) - no second clock domain, no CDC synchronizers. sdram2_ctrl's
+// own altddio_out generates a correctly-phased SDRAM2_CLK pin from
+// whatever clock it's given, so clk_ram doesn't need to already be
+// phase-shifted going in. See docs/NEPTUNOPLUS_PORT.md for why an earlier
+// attempt with a separate, phase-shifted clk_ram2 domain (and 2-FF req/ack
+// synchronizers into it) hit a CDC pulse-loss bug here instead.
+wire        DDRAM_CLK;        // unused: ddram.sv's own echo of its clk input
+wire        DDRAM_BUSY;
+wire  [7:0] DDRAM_BURSTCNT;
+wire [28:0] DDRAM_ADDR;
+wire [63:0] DDRAM_DOUT;
+wire        DDRAM_DOUT_READY;
+wire        DDRAM_RD;
+wire [63:0] DDRAM_DIN;
+wire  [7:0] DDRAM_BE;
+wire        DDRAM_WE;
+
+wire [26:1] sd2_addr;
+wire [15:0] sd2_dout, sd2_din;
+wire  [1:0] sd2_bs;
+wire        sd2_wr, sd2_rd, sd2_ready, sd2_idle;
+
+avalon_sdram_bridge sdram2_bridge
+(
+	.clk   (clk_ram),
+	.reset (reset || rst_ram), // same reset condition ddram.sv itself uses
+
+	.av_addr          (DDRAM_ADDR),
+	.av_din           (DDRAM_DIN),
+	.av_dout          (DDRAM_DOUT),
+	.av_read          (DDRAM_RD),
+	.av_write         (DDRAM_WE),
+	.av_be            (DDRAM_BE),
+	.av_burstcount    (DDRAM_BURSTCNT),
+	.av_waitrequest   (DDRAM_BUSY),
+	.av_readdatavalid (DDRAM_DOUT_READY),
+
+	.sd_addr (sd2_addr),
+	.sd_dout (sd2_dout),
+	.sd_din  (sd2_din),
+	.sd_wr   (sd2_wr),
+	.sd_bs   (sd2_bs),
+	.sd_rd   (sd2_rd),
+	.sd_ready(sd2_ready),
+	.sd_idle (sd2_idle)
+);
+
+// Conservative free-running refresh request: toggles every 256 clk_ram
+// cycles (~2.4us @ 107.5MHz), more often than the ~7.8us an 8192-row chip
+// actually needs - costs a little spare bandwidth, not correctness.
+reg [8:0] sd2_ref_cnt;
+always @(posedge clk_ram) sd2_ref_cnt <= sd2_ref_cnt + 1'd1;
+
+sdram sdram2_ctrl
+(
+	.init    (rst_ram),
+	.clk     (clk_ram),
+	.SDRAM_EN(1'b1),
+
+	.SDRAM_DQ  (SDRAM2_DQ),
+	.SDRAM_A   (SDRAM2_A),
+	.SDRAM_DQML(SDRAM2_DQML),
+	.SDRAM_DQMH(SDRAM2_DQMH),
+	.SDRAM_BA  (SDRAM2_BA),
+	.SDRAM_nCS (SDRAM2_nCS),
+	.SDRAM_nWE (SDRAM2_nWE),
+	.SDRAM_nRAS(SDRAM2_nRAS),
+	.SDRAM_nCAS(SDRAM2_nCAS),
+	.SDRAM_CKE (SDRAM2_CKE),
+	.SDRAM_CLK (SDRAM2_CLK),
+
+	.sel    (1'b1),
+	.addr   (sd2_addr),
+	.dout   (sd2_dout),
+	.din    (sd2_din),
+	.wr     (sd2_wr),
+	.bs     (sd2_bs),
+	.rd     (sd2_rd),
+	.ready  (sd2_ready),
+	.refresh(sd2_ref_cnt[8]),
+
+	.cpsel (1'b0),
+	.cpaddr('0),
+	.cpdin ('0),
+	.cprd  (),
+	.cpreq (1'b0),
+	.cpbusy(),
+
+	.dbg_ignored_cmd_cnt(),
+	.idle(sd2_idle)
+);
+
 /////////////////////////  VIDEO OUTPUT (MiST)  //////////////////////////
 // Replaces MiSTer's video_mixer/video_freak/scandoubler/HDMI-framebuffer
 // stage above (removed) with mist_video, fed from the same crop_r/g/b and
