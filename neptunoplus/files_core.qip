@@ -1,0 +1,26 @@
+# Core RTL shared verbatim with the MiSTer build (same list as the repo
+# root's files.qip, minus its last two lines: Saturn.sv / Saturn.sdc are the
+# MiSTer-only top level, replaced here by Saturn_MiST.sv + neptuno2_top.sv).
+set_global_assignment -name QIP_FILE ../rtl/FX68K/fx68k.qip
+set_global_assignment -name QIP_FILE ../rtl/SH/SH7604/SH7604.qip
+set_global_assignment -name QIP_FILE ../rtl/SH/SH7034/SH7034.qip
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/SH_mem.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/SH7604_mem.sv
+set_global_assignment -name QIP_FILE ../rtl/ADSP_21xx/ADSP_2181.qip
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/ADSP_21XX_mem.sv
+set_global_assignment -name QIP_FILE ../rtl/Saturn/Saturn.qip
+set_global_assignment -name VHDL_FILE ../rtl/CEGen.vhd
+set_global_assignment -name VHDL_FILE ../rtl/bram.vhd
+set_global_assignment -name VHDL_FILE ../rtl/mlab.vhd
+set_global_assignment -name VERILOG_FILE ../rtl/hps_ext.v
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/sdram1.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/sdram2.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/ddram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/vdp1_fb.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/hps2pad.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/ps2mouse.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/ps2keyboard.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/lightgun.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/cofi.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/jtframe_resync.v
+set_global_assignment -name SYSTEMVERILOG_FILE ../rtl/hps2cdd.sv
