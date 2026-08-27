@@ -2,64 +2,31 @@
 `timescale 1 ps / 1 ps
 // synopsys translate_on
 
+// NOTE (neptUNO+ port): the original implementation used `altdpram` in
+// MLAB mode with an unregistered (asynchronous) read address - a small
+// distributed-RAM style dual-port memory that Cyclone IV GX doesn't have
+// (no MLAB blocks, and its M9K blocks only support *registered*-address
+// dual-port access, i.e. one extra cycle of read latency that
+// SH_regfile.sv's combinational `assign RA_Q = RAMA_Q;` doesn't expect).
+// Replaced with a plain register array: at only 16x32 bits this is a
+// trivial resource cost on any FPGA family, and it reproduces the same
+// registered-write/combinational-read behavior exactly, so nothing
+// downstream needs to change.
 module SH_regram (
-	clock,
-	data,
-	rdaddress,
-	wraddress,
-	wren,
-	q);
+	input             clock,
+	input      [31:0] data,
+	input      [3:0]  rdaddress,
+	input      [3:0]  wraddress,
+	input             wren,
+	output     [31:0] q
+);
 
-	input	  clock;
-	input	[31:0]  data;
-	input	[3:0]  rdaddress;
-	input	[3:0]  wraddress;
-	input	  wren;
-	output	[31:0]  q;
-`ifndef ALTERA_RESERVED_QIS
-// synopsys translate_off
-`endif
-	tri0	  wren;
-`ifndef ALTERA_RESERVED_QIS
-// synopsys translate_on
-`endif
+	reg [31:0] mem[16];
 
-	wire [31:0] sub_wire0;
-	wire [31:0] q = sub_wire0[31:0];
-		
-	altdpram	altdpram_component (
-				.data (data),
-				.inclock (clock),
-				.rdaddress (rdaddress),
-				.wraddress (wraddress),
-				.wren (wren),
-				.q (sub_wire0),
-				.aclr (1'b0),
-				.byteena (1'b1),
-				.inclocken (1'b1),
-				.rdaddressstall (1'b0),
-				.rden (1'b1),
-//				.sclr (1'b0),
-				.wraddressstall (1'b0));
-	defparam
-		altdpram_component.indata_aclr = "OFF",
-		altdpram_component.indata_reg = "INCLOCK",
-		altdpram_component.intended_device_family = "Cyclone V",
-		altdpram_component.lpm_type = "altdpram",
-		altdpram_component.outdata_aclr = "OFF",
-		altdpram_component.outdata_reg = "UNREGISTERED",
-		altdpram_component.ram_block_type = "MLAB",
-		altdpram_component.rdaddress_aclr = "OFF",
-		altdpram_component.rdaddress_reg = "UNREGISTERED",
-		altdpram_component.rdcontrol_aclr = "OFF",
-		altdpram_component.rdcontrol_reg = "UNREGISTERED",
-		altdpram_component.read_during_write_mode_mixed_ports = "CONSTRAINED_DONT_CARE",
-		altdpram_component.width = 32,
-		altdpram_component.widthad = 4,
-		altdpram_component.width_byteena = 1,
-		altdpram_component.wraddress_aclr = "OFF",
-		altdpram_component.wraddress_reg = "INCLOCK",
-		altdpram_component.wrcontrol_aclr = "OFF",
-		altdpram_component.wrcontrol_reg = "INCLOCK";
+	always @(posedge clock) begin
+		if (wren) mem[wraddress] <= data;
+	end
+
+	assign q = mem[rdaddress];
 
 endmodule

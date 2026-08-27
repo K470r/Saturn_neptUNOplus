@@ -2725,7 +2725,11 @@ module VDP1_PAT_FIFO #(parameter l = 1) (
 	output	      FULL
 );
 
-	wire [15: 0] sub_wire0;
+	// NOTE (neptUNO+ port): backing memory replaced with a plain register
+	// array - altdpram/MLAB with an unregistered read address doesn't
+	// exist on Cyclone IV GX (see rtl/SH_mem.sv's SH_regram for the full
+	// explanation). This module had no `ifdef SIM` fallback to reuse.
+	reg  [15: 0] mem[1<<l];
 	bit  [l-1: 0] RADDR;
 	bit  [l-1: 0] WADDR;
 	bit  [l: 0] AMOUNT;
@@ -2739,13 +2743,14 @@ module VDP1_PAT_FIFO #(parameter l = 1) (
 		end
 		else begin
 			if (WRREQ && !AMOUNT[l]) begin
+				mem[WADDR] <= DATA;
 				WADDR <= WADDR + 1'd1;
 				NULL <= 0;
 			end
 			if (RDREQ && AMOUNT) begin
 				RADDR <= RADDR + 1'd1;
 			end
-			
+
 			if (WRREQ && !RDREQ && !AMOUNT[l]) begin
 				AMOUNT <= AMOUNT + 1'd1;
 			end else if (!WRREQ && RDREQ && AMOUNT) begin
@@ -2755,43 +2760,8 @@ module VDP1_PAT_FIFO #(parameter l = 1) (
 	end
 	assign EMPTY = ~|AMOUNT;
 	assign FULL = AMOUNT[l];
-	
-	altdpram	altdpram_component (
-				.data (DATA),
-				.inclock (CLK),
-				.rdaddress (RADDR),
-				.wraddress (WADDR),
-				.wren (WRREQ),
-				.q (sub_wire0),
-				.aclr (1'b0),
-				.byteena (1'b1),
-				.inclocken (1'b1),
-				.rdaddressstall (1'b0),
-				.rden (1'b1),
-//				.sclr (1'b0),
-				.wraddressstall (1'b0));
-	defparam
-		altdpram_component.indata_aclr = "OFF",
-		altdpram_component.indata_reg = "INCLOCK",
-		altdpram_component.intended_device_family = "Cyclone V",
-		altdpram_component.lpm_type = "altdpram",
-		altdpram_component.outdata_aclr = "OFF",
-		altdpram_component.outdata_reg = "UNREGISTERED",
-		altdpram_component.ram_block_type = "MLAB",
-		altdpram_component.rdaddress_aclr = "OFF",
-		altdpram_component.rdaddress_reg = "UNREGISTERED",
-		altdpram_component.rdcontrol_aclr = "OFF",
-		altdpram_component.rdcontrol_reg = "UNREGISTERED",
-		altdpram_component.read_during_write_mode_mixed_ports = "CONSTRAINED_DONT_CARE",
-		altdpram_component.width = 16,
-		altdpram_component.widthad = l,
-		altdpram_component.width_byteena = 1,
-		altdpram_component.wraddress_aclr = "OFF",
-		altdpram_component.wraddress_reg = "INCLOCK",
-		altdpram_component.wrcontrol_aclr = "OFF",
-		altdpram_component.wrcontrol_reg = "INCLOCK";
-		
-	assign Q = NULL ? '0 : sub_wire0;
+
+	assign Q = NULL ? '0 : mem[RADDR];
 
 endmodule
 
@@ -2804,44 +2774,14 @@ module VDP1_COL_TBL (
 	output [15:0] Q
 );
 
-	wire [15:0] sub_wire0;
+	// NOTE (neptUNO+ port): see VDP1_PAT_FIFO above - same fix, same reason.
+	reg [15:0] mem[16];
 
-	altdpram	altdpram0 (
-				.data (DATA),
-				.inclock (CLK),
-				.rdaddress (RDADDR[3:0]),
-				.wraddress (WRADDR[3:0]),
-				.wren (WREN),
-				.q (sub_wire0),
-				.aclr (1'b0),
-				.byteena (1'b1),
-				.inclocken (1'b1),
-				.rdaddressstall (1'b0),
-				.rden (1'b1),
-				//.sclr (1'b0),
-				.wraddressstall (1'b0));
-	defparam
-		altdpram0.indata_aclr = "OFF",
-		altdpram0.indata_reg = "INCLOCK",
-		altdpram0.intended_device_family = "Cyclone V",
-		altdpram0.lpm_type = "altdpram",
-		altdpram0.outdata_aclr = "OFF",
-		altdpram0.outdata_reg = "UNREGISTERED",
-		altdpram0.ram_block_type = "MLAB",
-		altdpram0.rdaddress_aclr = "OFF",
-		altdpram0.rdaddress_reg = "UNREGISTERED",
-		altdpram0.rdcontrol_aclr = "OFF",
-		altdpram0.rdcontrol_reg = "UNREGISTERED",
-		altdpram0.read_during_write_mode_mixed_ports = "CONSTRAINED_DONT_CARE",
-		altdpram0.width = 16,
-		altdpram0.widthad = 4,
-		altdpram0.width_byteena = 1,
-		altdpram0.wraddress_aclr = "OFF",
-		altdpram0.wraddress_reg = "INCLOCK",
-		altdpram0.wrcontrol_aclr = "OFF",
-		altdpram0.wrcontrol_reg = "INCLOCK";
+	always @(posedge CLK) begin
+		if (WREN) mem[WRADDR[3:0]] <= DATA;
+	end
 
-	assign Q =  sub_wire0;
+	assign Q = mem[RDADDR[3:0]];
 
 endmodule
 

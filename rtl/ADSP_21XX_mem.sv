@@ -171,43 +171,24 @@ module ADSP_21xx_STACK
 	assign Q = PUSH ? DATA : MEM[ADDR - 1'd1];
 	assign Q2 = MEM[ADDR - 1'd1];
 											  	
-`else 
-	
-	altdpram	altdpram_component (
-				.data (DATA),
-				.inclock (CLK),
-				.rdaddress (ADDR - 1'd1),
-				.wraddress (ADDR),
-				.wren (PUSH && EN),
-				.q (sub_wire0),
-				.aclr (1'b0),
-				.byteena (1'b1),
-				.inclocken (1'b1),
-				.rdaddressstall (1'b0),
-				.rden (1'b1),
-//				.sclr (1'b0),
-				.wraddressstall (1'b0));
-	defparam
-		altdpram_component.indata_aclr = "OFF",
-		altdpram_component.indata_reg = "INCLOCK",
-		altdpram_component.intended_device_family = "Cyclone V",
-		altdpram_component.lpm_type = "altdpram",
-		altdpram_component.outdata_aclr = "OFF",
-		altdpram_component.outdata_reg = "UNREGISTERED",
-		altdpram_component.ram_block_type = "MLAB",
-		altdpram_component.rdaddress_aclr = "OFF",
-		altdpram_component.rdaddress_reg = "UNREGISTERED",
-		altdpram_component.rdcontrol_aclr = "OFF",
-		altdpram_component.rdcontrol_reg = "UNREGISTERED",
-		altdpram_component.read_during_write_mode_mixed_ports = "CONSTRAINED_DONT_CARE",
-		altdpram_component.width = data_width,
-		altdpram_component.widthad = addr_width,
-		altdpram_component.width_byteena = 1,
-		altdpram_component.wraddress_aclr = "OFF",
-		altdpram_component.wraddress_reg = "INCLOCK",
-		altdpram_component.wrcontrol_aclr = "OFF",
-		altdpram_component.wrcontrol_reg = "INCLOCK";
-		
+`else
+
+	// NOTE (neptUNO+ port): backing memory replaced with a plain register
+	// array - altdpram/MLAB with an unregistered read address doesn't
+	// exist on Cyclone IV GX (see the same note on SH_regram in
+	// rtl/SH_mem.sv). This is the exact same model the `ifdef SIM` branch
+	// above already used, so behavior is unchanged either way.
+	reg [data_width-1:0] MEM[2**addr_width];
+
+	always @(posedge CLK) begin
+		if (EN) begin
+			if (PUSH) begin
+				MEM[ADDR] <= DATA;
+			end
+		end
+	end
+
+	assign sub_wire0 = MEM[ADDR - 1'd1];
 	assign Q = PUSH ? DATA : sub_wire0;
 	assign Q2 = sub_wire0;
 

@@ -1,5 +1,6 @@
 LIBRARY ieee;
 USE ieee.std_logic_1164.all;
+USE ieee.numeric_std.all;
 
 LIBRARY altera_mf;
 USE altera_mf.altera_mf_components.all;
@@ -21,41 +22,27 @@ ENTITY mlab IS
 	);
 END ENTITY;
 
+-- NOTE (neptUNO+ port): backing memory replaced with a plain register
+-- array - altdpram/MLAB with an unregistered read address doesn't exist
+-- on Cyclone IV GX (see rtl/SH_mem.sv's SH_regram for the full
+-- explanation). This entity is unused by the neptUNO+ build (no live
+-- instantiation was found), fixed anyway to remove any doubt.
 ARCHITECTURE SYN OF mlab IS
 	signal q0 : std_logic_vector((data_width - 1) downto 0);
+	type mem_t is array (0 to (2**addr_width)-1) of std_logic_vector(data_width-1 downto 0);
+	signal mem : mem_t;
 BEGIN
-	q<= q0 when cs = '1' else (others => '1');
+	q <= q0 when cs = '1' else (others => '1');
 
-	altdpram_component : altdpram
-	GENERIC MAP (
-		indata_aclr => "OFF",
-		indata_reg => "INCLOCK",
-		intended_device_family => "Cyclone V",
-		lpm_type => "altdpram",
-		outdata_aclr => "OFF",
-		outdata_reg => "UNREGISTERED",
-		ram_block_type => "MLAB",
-		rdaddress_aclr => "OFF",
-		rdaddress_reg => "UNREGISTERED",
-		rdcontrol_aclr => "OFF",
-		rdcontrol_reg => "UNREGISTERED",
-		read_during_write_mode_mixed_ports => "CONSTRAINED_DONT_CARE",
-		width => data_width,
-		widthad => addr_width,
-		width_byteena => 1,
-		wraddress_aclr => "OFF",
-		wraddress_reg => "INCLOCK",
-		wrcontrol_aclr => "OFF",
-		wrcontrol_reg => "INCLOCK"
-	)
-	PORT MAP (
-		data 			=> data,
-		outclock 	=> clock,
-		rdaddress 	=> rdaddress,
-		wren 			=> wren,
-		inclock 		=> clock,
-		wraddress 	=> wraddress,
-		q 				=> q0
-	);
+	process (clock)
+	begin
+		if rising_edge(clock) then
+			if wren = '1' then
+				mem(to_integer(unsigned(wraddress))) <= data;
+			end if;
+		end if;
+	end process;
+
+	q0 <= mem(to_integer(unsigned(rdaddress)));
 
 END SYN;

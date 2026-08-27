@@ -298,13 +298,93 @@ alterna cada 256 ciclos de `clk_ram` (~2.4us a 107.5MHz) - conservador
 `SDRAM2_*` cableados de extremo a extremo (`neptuno2_top.sv` →
 `Saturn_MiST.sv`), con el pinout de `NeoGeo_neptunoplus_dr.qsf`.
 
-Sin verificar en Quartus todavía (no hay toolchain en esta sesión) - el
-siguiente paso natural es compilar.
+Primera compilación real en Quartus: hubo que arreglar señales
+declaradas de menos (`RESET`, `*_download`, `OSD_STATUS`) y luego apareció
+un hallazgo nuevo, más grande - ver la sección siguiente.
+
+## Cyclone IV GX no tiene `altdpram`/MLAB (hallazgo grave, ya resuelto)
+
+Tras resolver los primeros errores de compilación, Quartus falló al
+elaborar `SH_regram` (el banco de registros de 16x32 bits de la CPU SH2)
+con:
+
+```
+Error (287078): Assertion error: Can't convert dual-port RAM for Cyclone
+IV GX device family using altsyncram megafunction because Cyclone IV GX
+supports only synchronous dual-port RAM
+Error (12152): Can't elaborate user hierarchy
+"...SH_core:core|SH2_regfile:regfile|SH_regram:regramA|altdpram:altdpram_component"
+```
+
+Causa raíz: el core original usa `altdpram` en modo `MLAB` para todas
+las memorias pequeñas con lectura asíncrona (dirección de lectura sin
+registrar). Los bloques MLAB solo existen en familias más nuevas
+(Cyclone V y posteriores); Cyclone IV GX solo tiene bloques M9K, que
+requieren dirección de lectura registrada (síncrona). No hay forma de
+pedirle a `altdpram`/MLAB que sintetice en Cyclone IV GX.
+
+Esto resultó ser un patrón repetido en **todo el repo**, no un caso
+aislado: 13 archivos usan `altdpram`/MLAB. Se hizo un barrido sistemático
+de todo `rtl/` para reemplazar cada instancia por un simple array de
+registros (`reg [...] mem[...]`), que sintetiza igual en cualquier
+familia y preserva la semántica de lectura asíncrona (necesaria porque
+varios llamadores, como `SH_regfile.sv`, leen el dato de forma
+combinacional en el mismo ciclo).
+
+Detalle interesante encontrado en el camino: varios de estos módulos ya
+tenían una rama `` `ifdef SIM ``/`` `else ``, donde la rama `SIM` era
+exactamente el array de registros correcto y la rama `else` era el
+`altdpram` roto. El truco es que `` `define SIM `` está envuelto en
+comentarios `// synopsys translate_off` / `// synopsys translate_on` -
+pero eso es solo una convención para *simuladores*; Quartus no respeta
+esos comentarios al sintetizar, así que para los módulos donde el
+`` `define SIM `` está definido en el mismo archivo, antes de su propio
+`` `ifdef SIM ``, la macro SÍ está activa también durante la síntesis
+real y la rama "simulación" ya se estaba seleccionando sola. Para esos
+casos no hacía falta tocar nada (se dejaron como estaban); para los
+módulos sin ese guard, o con el `altdpram` totalmente incondicional, se
+aplicó el fix directo.
+
+Módulos corregidos: `SH_regram` (`rtl/SH_mem.sv`), `ddr_infifo` y
+`ddr_cache_ram` (`rtl/ddram.sv`), `SCU_CBUS_CACHE` (`rtl/Saturn/SCU/RAM.sv`,
+ya estaba a salvo por el guard pero se dejó explícito), `VDP2_WRITE_FIFO`
+(`rtl/Saturn/VDP2/VDP2_mem.sv`), `SMPC_OREG_RAM`/`SMPC_SMEM`
+(`rtl/Saturn/SMPC_HLE.sv`), `SCSP_KEY_RAM`/`SCSP_STACK_RAM`
+(`rtl/Saturn/SCSP/SCSP.sv`), `VDP1_PAT_FIFO`/`VDP1_COL_TBL`
+(`rtl/Saturn/VDP1/VDP1.sv`), `CACHE_TAG`/`CACHE_VALID`/`CACHE_LRU`
+(`rtl/SH7604_mem.sv`), y `mlab.vhd` (entidad VHDL genérica, sin uso real
+en el diseño pero corregida igual por prudencia).
+
+No se tocó (protegidos por su propio `` `define SIM ``/`` `ifdef SIM ``
+local, ya seleccionan la rama segura): `HMCS400_MR`/`HMCS400_STACK`
+(`rtl/Saturn/SMPC/HMCS400_mem.sv` - `HMCS400_ROM` usa `altsyncram` en modo
+`"ROM"`, que sí es compatible), `SMPC_ERAM`/`SMPC_IREG`/`SMPC_OREG`
+(`rtl/Saturn/SMPC/SMPC.sv`), `ADSP_21xx_MEM`/`ADSP_21xx_STACK`
+(`rtl/ADSP_21XX_mem.sv`).
+
+Confirmado como código muerto (no referenciado por ningún `.qip`, no se
+tocó): `rtl/SH/core/SH_mem.sv` y `rtl/SH/SH7604/SH7604_mem.sv` - son
+duplicados del mismo módulo con nombre de archivo idéntico pero en otra
+carpeta; los archivos reales que compila el proyecto son los de nivel
+raíz (`rtl/SH_mem.sv`, `rtl/SH7604_mem.sv`).
+
+Nota aparte, sin resolver todavía: hay uso de `altsyncram` en modo
+`"BIDIR_DUAL_PORT"` (verdadero dual-puerto, con escritura independiente
+en ambos puertos) en `rtl/bram.vhd`, `rtl/ADSP_21XX_mem.sv` (ya a salvo
+por el guard) y, sin guard, en `VDP2_PAL_RAM`
+(`rtl/Saturn/VDP2/VDP2_mem.sv`). A diferencia de `altdpram`/MLAB, este es
+un caso distinto (`altsyncram`, con dirección de lectura registrada/
+síncrona) que en principio Cyclone IV GX sí soporta de forma nativa vía
+M9K - no se tocó especulativamente para no arriesgar introducir un bug
+nuevo en una RAM de verdadera doble escritura sin evidencia real del
+compilador de que haga falta. Si la próxima compilación falla ahí,
+será la siguiente cosa a investigar.
 
 ### Pendiente
 
-1. Compilar en Quartus y resolver lo que salga - primera vez que se
-   compila esta integración.
+1. Recompilar en Quartus con el barrido de `altdpram`/MLAB aplicado -
+   candidato fuerte a ser el próximo error es `VDP2_PAL_RAM` si
+   `BIDIR_DUAL_PORT` resulta no ser compatible después de todo.
 2. `debug_uart` sigue sin traerse a este repo (vive en la otra máquina del
    usuario) - hace falta para depurar en hardware real cuando llegue el
    momento; dado que el cuelgue en `0x000000` era específico del diseño con
