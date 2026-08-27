@@ -183,6 +183,14 @@ wire  [2:0] cart_type = status[23:21];
 // user_io's buttons[1] instead, same as every other line here.
 wire        RESET = 1'b0;
 
+// MiSTer-only top-level input telling the core whether the OSD is
+// currently open, used to gate one of the autosave triggers below (the
+// other, sd_lba/img_mounted-driven autosave-on-change path still works
+// without it). No equivalent signal from classic MiST's user_io - tied
+// low, so that specific "autosave while OSD is open" trigger just never
+// fires in this milestone.
+wire        OSD_STATUS = 1'b0;
+
 // These were declared right after hps_io in MiSTer's Saturn.sv and are read
 // deep inside the copied-verbatim core-wiring block below; missing them was
 // an oversight in the first draft (Quartus caught it as "not declared").
