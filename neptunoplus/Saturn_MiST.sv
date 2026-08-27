@@ -162,6 +162,21 @@ wire [35:0] EXT_BUS = 36'h0;      // unused expansion bus
 
 wire  [2:0] cart_type = status[23:21];
 
+// No discrete hardware reset pin on this board (classic MiST doesn't have
+// one either); the core resets via the OSD "Reset" option (status[0]) and
+// user_io's buttons[1] instead, same as every other line here.
+wire        RESET = 1'b0;
+
+// These were declared right after hps_io in MiSTer's Saturn.sv and are read
+// deep inside the copied-verbatim core-wiring block below; missing them was
+// an oversight in the first draft (Quartus caught it as "not declared").
+wire        bios_download   = ioctl_download & (ioctl_index[5:2] == 4'b0000 && ioctl_index[1:0] != 2'h3);
+wire        cart_download   = ioctl_download & (ioctl_index[5:2] == 4'b0000 && ioctl_index[1:0] == 2'h3);
+wire        save_download   = ioctl_download & (ioctl_index[5:2] == 4'b0001);
+wire        save_upload     = 1'b0; // no ioctl_upload path in classic MiST data_io
+wire        cdd_download    = ioctl_download & (ioctl_index[5:2] == 4'b0010);
+wire        cdboot_download = ioctl_download & (ioctl_index[5:2] == 4'b0011);
+
 /////////////////////////  USER I/O (joystick, status, ps2, sd)  ////////////
 wire [1:0] sd_ack_x;
 wire       key_pressed_w, key_extended_w, key_strobe_w;
