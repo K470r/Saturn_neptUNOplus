@@ -508,6 +508,33 @@ Dos hallazgos del log de esta compilación, ambos en
   PLL que son inherentemente asíncronos. Habrá que ver en la próxima
   compilación cuánto de eso desaparece.
 
+## `sdram_clk` apuntaba al reloj equivocado del PLL (ya resuelto)
+
+Con el fix anterior aplicado, la siguiente compilación reveló un segundo
+bug relacionado, antes oculto porque `$sdram_clk` ni siquiera resolvía a
+un reloj real: decenas de
+
+```
+Warning (332079): Reference pin SDRAM_CLK is invalid. It is not clocked
+by the clock specified in set_input_delay/set_output_delay's -clock
+option.
+```
+
+Causa: `sdram_clk` apuntaba a `clk[0]` (`clk_sys`), pero el pin físico
+`SDRAM_CLK` lo genera `sdram1.sv` internamente a partir de `clk_ram`
+(`clk[1]`), vía un `altddio_out`. El mecanismo `-reference_pin` exige que
+el pin de referencia esté efectivamente en el dominio del reloj indicado
+en `-clock` - no lo estaba. Se corrigió apuntando `sdram_clk` a `clk[1]`.
+`sys_clk` (usado para `AUDIO_*`/`LED`/`VGA_*`, sin `-reference_pin`) se
+dejó en `clk[0]`, correcto porque el core (`Saturn:saturn`) y
+`mist_video` sí corren en `clk_sys`.
+
+De paso se notó que la SDRAM2 (chip de expansión, mismo controlador
+`sdram2_ctrl` basado en `sdram1.sv`, mismo dominio `clk_ram`) no tenía
+ninguna restricción de timing en absoluto - ni siquiera del tipo roto
+que se acaba de corregir. Se agregaron las mismas restricciones de
+`SDRAM_DQ`/`SDRAM_A`/etc. mirrorizadas para `SDRAM2_*`.
+
 ### Pendiente
 
 1. **Timing no cerrado todavía** (`Critical Warning (332148): Timing
