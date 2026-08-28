@@ -31,10 +31,6 @@ set_input_delay -clock [get_clocks $sdram_clk] -reference_pin [get_ports {SDRAM2
 set_input_delay -clock [get_clocks $sdram_clk] -reference_pin [get_ports {SDRAM2_CLK}] -min 3.2 [get_ports SDRAM2_DQ[*]]
 
 set_output_delay -add_delay -clock [get_clocks {SPI_SCK}] 1.000 [get_ports {SPI_DO}]
-set_output_delay -add_delay -clock [get_clocks $sys_clk]  1.000 [get_ports {AUDIO_L}]
-set_output_delay -add_delay -clock [get_clocks $sys_clk]  1.000 [get_ports {AUDIO_R}]
-set_output_delay -add_delay -clock [get_clocks $sys_clk]  1.000 [get_ports {LED}]
-set_output_delay -add_delay -clock [get_clocks $sys_clk]  1.000 [get_ports {VGA_*}]
 
 set_output_delay -clock [get_clocks $sdram_clk] -reference_pin [get_ports {SDRAM_CLK}] -max 1.5 [get_ports {SDRAM_D* SDRAM_A* SDRAM_BA* SDRAM_n* SDRAM_CKE}]
 set_output_delay -clock [get_clocks $sdram_clk] -reference_pin [get_ports {SDRAM_CLK}] -min -0.8 [get_ports {SDRAM_D* SDRAM_A* SDRAM_BA* SDRAM_n* SDRAM_CKE}]
@@ -44,5 +40,18 @@ set_output_delay -clock [get_clocks $sdram_clk] -reference_pin [get_ports {SDRAM
 
 set_clock_groups -asynchronous -group [get_clocks {SPI_SCK}] -group [get_clocks {saturn_mist|pll_sys|altpll_component|auto_generated|pll1|clk[*]}]
 
-set_multicycle_path -to {VGA_*[*]} -setup 3
-set_multicycle_path -to {VGA_*[*]} -hold 2
+# Salidas fisicas sin receptor sincrono real en nuestro diseño: DAC de audio
+# analogico (AUDIO_L/R, hacia un filtro RC externo), el LED discreto, VGA
+# (hacia un monitor/scaler externo, no otro dominio de reloj FPGA) y
+# UART_TX (hacia un periferico externo asincrono). Antes tenian un
+# set_output_delay de 1ns arbitrario contra sys_clk que solo generaba
+# violaciones de timing "de mentira" en el dominio clk[0] - ningun
+# receptor real necesita que se cumplan.
+set_false_path -to [get_ports {AUDIO_L AUDIO_R LED VGA_* UART_TX}]
+
+# JOY_DATA/JOY_XLOAD (entradas) son la cadena de joystick tipo daisy-chain
+# del conector DB9, totalmente asincrona, sin relacion de reloj con
+# clk_sys/clk_ram. JOY_XDATA es un simple passthrough combinacional de
+# JOY_DATA (ver neptuno2_top.sv: "assign JOY_XDATA = JOY_DATA;"), asi que
+# ya queda cubierto por el false path de JOY_DATA.
+set_false_path -from [get_ports {JOY_DATA JOY_XLOAD}]
