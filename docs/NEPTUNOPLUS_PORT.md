@@ -478,11 +478,53 @@ fusionado) en vez de sobre `SDRAM_CLK` directamente, lo cual lo hacía
 confuso de leer en el log. Se quitó el `assign` sobrante; `SDRAM_CLK` ya
 solo lo maneja `sdram1`.
 
+## Primera compilación completa exitosa (Analysis & Synthesis → Fitter →
+## Assembler → TimeQuest, 0 errores)
+
+Con los tres fixes anteriores (barrido de `altdpram`/MLAB, `SEARCH_PATH`
+para los `.mif`, `mist_video`) la compilación completa terminó sin
+errores por primera vez, generando el `.sof`/`.pof`/`.rbf` de
+programación. `VDP2_PAL_RAM` (`BIDIR_DUAL_PORT` con `altsyncram`) resultó
+compatible con Cyclone IV GX tal como se esperaba - no hizo falta tocarlo.
+
+Dos hallazgos del log de esta compilación, ambos en
+`Saturn_neptunoplus.sdc` (ya corregidos):
+
+- Las variables `sdram_clk`/`sys_clk` apuntaban al reloj del PLL sin el
+  prefijo de jerarquía (`saturn_mist|...`), y lo mismo en el
+  `set_clock_groups` de la línea 36 (referencia directa, sin variable).
+  TimeQuest reportó explícitamente `Argument -clock is an empty
+  collection` para cada `set_input_delay`/`set_output_delay` que usaba
+  esas variables, y `could not be matched with a clock` para el
+  `set_clock_groups` - es decir, **ninguna** de esas restricciones se
+  estaba aplicando: ni la interfaz de la SDRAM (`SDRAM_DQ`, `SDRAM_A`,
+  etc.), ni audio/VGA, ni la exclusión de `SPI_SCK` como dominio de reloj
+  asíncrono frente al PLL. Se corrigió agregando `saturn_mist|` al
+  nombre del reloj en los tres lugares.
+- La falta de esa exclusión de `SPI_SCK` como asíncrono probablemente
+  explica buena parte del slack negativo que el log reportó bajo el
+  dominio `SPI_SCK` (`-4.714 ns` setup, `-5.628 ns` recovery) - TimeQuest
+  estaba intentando analizar como síncronos caminos entre `SPI_SCK` y el
+  PLL que son inherentemente asíncronos. Habrá que ver en la próxima
+  compilación cuánto de eso desaparece.
+
 ### Pendiente
 
-1. Candidato a ser el siguiente error: `VDP2_PAL_RAM` si `BIDIR_DUAL_PORT`
-   resulta no ser compatible con Cyclone IV GX después de todo (ver nota
-   más arriba).
+1. **Timing no cerrado todavía** (`Critical Warning (332148): Timing
+   requirements not met`) - slack de setup peor caso de **-8.892 ns** en
+   `clk[0]` (`clk_sys`, ~53.75MHz) y **-8.439 ns** en `clk[1]` (`clk_ram`),
+   en el modelo más lento (1200mV/85°C). Esto es esperable en una primera
+   compilación de un diseño de este tamaño sin ningún trabajo de
+   optimización todavía, pero es un riesgo real: con timing no cerrado el
+   diseño puede comportarse de forma errática en hardware real (datos
+   corrompidos, cuelgues intermitentes) aunque el bitstream cargue sin
+   problema. Antes de invertir tiempo depurando "bugs" en hardware real,
+   conviene tener en cuenta que parte de lo que se vea podría ser
+   simplemente timing no cumplido. Con la corrección del `.sdc` de arriba,
+   la próxima compilación va a dar una lectura más real de cuánto slack
+   negativo queda una vez que la SDRAM y `SPI_SCK` están correctamente
+   constreñidos - hay que ver ese número antes de decidir si conviene
+   perseguir el critical path o directamente probar en hardware primero.
 2. Afinar `ce_divider` en la instancia de `mist_video` una vez haya
    imagen en pantalla real, si el scandoubler/OSD se ven desalineados.
 3. `debug_uart` sigue sin traerse a este repo (vive en la otra máquina del
