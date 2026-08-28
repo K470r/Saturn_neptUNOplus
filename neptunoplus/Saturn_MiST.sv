@@ -350,7 +350,14 @@ pll_sys pll_sys
 	.locked (locked)
 );
 
-assign SDRAM_CLK = clk_ram;
+// NOTE (neptUNO+ port): SDRAM_CLK is NOT a direct alias of clk_ram - the
+// sdram1 instance below generates it itself via an altddio_out DDR output
+// register (see rtl/sdram1.sv), fed from clk_ram, and drives the
+// SDRAM_CLK pin through its own output port. A leftover
+// "assign SDRAM_CLK = clk_ram;" here used to fight that second driver
+// for the same net (Error 12014/12015 - Quartus merges a plain wire-to-
+// wire assign into one physical net, so the conflict surfaced as two
+// drivers on "clk_ram" instead of on "SDRAM_CLK").
 
 	wire reset = RESET | status[0] | buttons[1];
 	

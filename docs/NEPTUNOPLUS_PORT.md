@@ -451,6 +451,33 @@ relación real `DCLK`/`clk_sys` de este core (`DCLK` en VDP2.sv es
 divisor fijo) - si en hardware real se ve desalineado el OSD o el
 scandoubler, este valor es el primer lugar a revisar.
 
+## `SDRAM_CLK` con dos manejadores (ya resuelto)
+
+La compilación siguiente falló con:
+
+```
+Error (12014): Net "Saturn_MiST:saturn_mist|clk_ram", which fans out to
+"Saturn_MiST:saturn_mist|sd2_ref_cnt[0]", cannot be assigned more than
+one value
+Error (12015): Net is fed by "...pll_sys:pll_sys|c1"
+Error (12015): Net is fed by "...sdram1:sdram1|SDRAM_CLK"
+```
+
+Causa: en la sección de relojes de `Saturn_MiST.sv` había un
+`assign SDRAM_CLK = clk_ram;` heredado de un borrador anterior, de
+cuando `SDRAM_CLK` todavía no tenía un generador propio. Pero
+`rtl/sdram1.sv` (el controlador de la SDRAM de a bordo) genera su propio
+`SDRAM_CLK` internamente vía un registro de salida DDR (`altddio_out`,
+alimentado por `clk_ram`) y lo entrega por su propio puerto de salida,
+conectado en su instanciación (`.SDRAM_CLK(SDRAM_CLK)`) - así que
+`SDRAM_CLK` terminaba con DOS manejadores: el `assign` directo y el
+puerto de salida de `sdram1`. Quartus fusiona un `assign` simple
+cable-a-cable en un único net físico, así que el conflicto apareció
+reportado sobre `clk_ram` (con quien `SDRAM_CLK` había quedado
+fusionado) en vez de sobre `SDRAM_CLK` directamente, lo cual lo hacía
+confuso de leer en el log. Se quitó el `assign` sobrante; `SDRAM_CLK` ya
+solo lo maneja `sdram1`.
+
 ### Pendiente
 
 1. Candidato a ser el siguiente error: `VDP2_PAL_RAM` si `BIDIR_DUAL_PORT`
