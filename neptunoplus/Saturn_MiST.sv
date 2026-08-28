@@ -1997,8 +1997,15 @@ sdram sdram2_ctrl
 // stage above (removed) with mist_video, fed from the same crop_r/g/b and
 // analog_hs/vs/cofi_hbl/cofi_vbl signals the copied-verbatim block already
 // produces.
-wire osd_enable;
-
+//
+// NOTE (neptUNO+ port): this build's mist_video.v (mist-modules/, pinned
+// submodule) has no "osd_enable" port - it drives the OSD overlay itself
+// straight off SPI_SS3/SPI_SCK/SPI_DI, no external enable needed. It does
+// need "ce_divider" though (missing before, which left the scandoubler's
+// internal pixel-clock detection undriven): using 3'd3 (clk_sys/4), the
+// scandoubler's own documented "for compatibility" default. Revisit if
+// OSD alignment/scandoubler timing looks off on real hardware - our
+// actual DOT_CE_R/DCLK ratio to clk_sys hasn't been tuned here yet.
 mist_video #(.SD_HCNT_WIDTH(10), .COLOR_DEPTH(8), .OUT_COLOR_DEPTH(8), .USE_BLANKS(1'b1)) mist_video
 (
 	.clk_sys(clk_sys),
@@ -2008,6 +2015,7 @@ mist_video #(.SD_HCNT_WIDTH(10), .COLOR_DEPTH(8), .OUT_COLOR_DEPTH(8), .USE_BLAN
 	.SPI_DI(SPI_DI),
 
 	.scanlines(2'b00),
+	.ce_divider(3'd3),
 	.scandoubler_disable(scandoubler_disable),
 	.ypbpr(ypbpr),
 	.no_csync(no_csync),
@@ -2021,8 +2029,6 @@ mist_video #(.SD_HCNT_WIDTH(10), .COLOR_DEPTH(8), .OUT_COLOR_DEPTH(8), .USE_BLAN
 	.VSync(analog_vs),
 	.HBlank(cofi_hbl),
 	.VBlank(cofi_vbl),
-
-	.osd_enable(osd_enable),
 
 	.VGA_R(VGA_R),
 	.VGA_G(VGA_G),

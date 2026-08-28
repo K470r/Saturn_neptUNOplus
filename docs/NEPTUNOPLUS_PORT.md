@@ -420,19 +420,44 @@ set_global_assignment -name SEARCH_PATH ".."
 Esto le dice a Quartus que busque también en la raíz del repo, sin tocar
 ningún archivo compartido. De paso también cubre el mismo patrón en
 `neptunoplus/Saturn_MiST.sv` (`E93C45 #("rtl/stv_eeprom.mif")`, el
-EEPROM de STV, también instanciado sin condición).
+EEPROM de STV, también instanciado sin condición). Confirmado: la
+siguiente compilación ya no reportó ningún error de `.mif`, así que
+`SEARCH_PATH` resolvió el problema tal como se esperaba.
+
+## `mist_video`: puerto `osd_enable` inexistente y `ce_divider` sin conectar
+
+La compilación siguiente falló con:
+
+```
+Error (12002): Port "osd_enable" does not exist in macrofunction "mist_video"
+```
+
+La instancia de `mist_video` en `Saturn_MiST.sv` conectaba un puerto
+`osd_enable` que no existe en la versión real de
+`mist-modules/mist_video.v` (el submódulo vendorizado que realmente se
+compila) - ese módulo maneja el overlay del OSD internamente a partir de
+`SPI_SCK`/`SPI_SS3`/`SPI_DI`, sin necesitar una señal externa de enable.
+Se quitó esa conexión (y el `wire osd_enable` que ya no se usaba en
+ningún otro lado).
+
+De paso se notó que a la instancia le faltaba conectar `ce_divider`
+(entrada de 3 bits, obligatoria en este módulo, que le indica al
+scandoubler interno la relación entre `clk_sys` y el reloj de píxel para
+poder sincronizar su muestreo). Se conectó a `3'd3` (clk_sys/4), que es
+el valor que el propio `scandoubler.v` documenta como su default "para
+compatibilidad" cuando no se especifica nada. No se afinó contra la
+relación real `DCLK`/`clk_sys` de este core (`DCLK` en VDP2.sv es
+`DOT_CE_R | (DOT_CE_F & HRES[1])`, una señal de enable variable, no un
+divisor fijo) - si en hardware real se ve desalineado el OSD o el
+scandoubler, este valor es el primer lugar a revisar.
 
 ### Pendiente
 
-1. Recompilar en Quartus con el `SEARCH_PATH` agregado - si Quartus
-   resuelve el `.mif` buscando `<search_path>/<ruta literal>` (que es el
-   comportamiento esperado), esto debería quedar resuelto. Si no,
-   alternativa a considerar: copiar los `.mif` también bajo
-   `neptunoplus/rtl/...` para que la ruta literal funcione sin
-   `SEARCH_PATH`.
-2. Candidato a ser el siguiente error: `VDP2_PAL_RAM` si `BIDIR_DUAL_PORT`
+1. Candidato a ser el siguiente error: `VDP2_PAL_RAM` si `BIDIR_DUAL_PORT`
    resulta no ser compatible con Cyclone IV GX después de todo (ver nota
    más arriba).
+2. Afinar `ce_divider` en la instancia de `mist_video` una vez haya
+   imagen en pantalla real, si el scandoubler/OSD se ven desalineados.
 3. `debug_uart` sigue sin traerse a este repo (vive en la otra máquina del
    usuario) - hace falta para depurar en hardware real cuando llegue el
    momento; dado que el cuelgue en `0x000000` era específico del diseño con
