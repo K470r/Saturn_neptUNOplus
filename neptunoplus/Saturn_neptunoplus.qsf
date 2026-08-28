@@ -6,6 +6,15 @@ set_global_assignment -name TOP_LEVEL_ENTITY neptuno2_top
 set_global_assignment -name NUM_PARALLEL_PROCESSORS ALL
 set_global_assignment -name PRE_FLOW_SCRIPT_FILE "quartus_sh:build_id.tcl"
 
+# rtl/Saturn/Saturn.sv trae algunas rutas de .mif (smpc.mif, cdb105m.mif)
+# escritas como literales relativos a la raiz del repo, porque ahi vive
+# el .qpf original de MiSTer. Nuestro proyecto vive un nivel mas abajo,
+# en neptunoplus/, asi que le indicamos a Quartus que busque tambien en
+# la raiz del repo en vez de tocar ese archivo compartido (tambien lo
+# compila el target MiSTer original desde la raiz, que si necesita las
+# rutas "rtl/..." tal cual estan).
+set_global_assignment -name SEARCH_PATH ".."
+
 # Analysis & Synthesis Assignments
 # ================================
 set_global_assignment -name DEVICE EP4CGX150DF27I7

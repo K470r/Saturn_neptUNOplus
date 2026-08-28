@@ -387,15 +387,53 @@ arriesgar introducir un bug nuevo en una RAM de verdadera doble
 escritura sin evidencia real del compilador de que haga falta. Si la
 próxima compilación falla ahí, será la siguiente cosa a investigar.
 
+## Rutas de `.mif` relativas a la raíz del repo (ya resuelto)
+
+Tras corregir todo `altdpram`/MLAB, la siguiente compilación falló con:
+
+```
+Error (127001): Can't find Memory Initialization File or Hexadecimal
+(Intel-Format) File rtl/Saturn/SMPC/smpc.mif for ROM instance ALTSYNCRAM
+Error (12152): Can't elaborate user hierarchy
+"...SMPC:SMPC|HMCS400_ROM:ROM|altsyncram:altsyncram_component|..."
+```
+
+Causa: `rtl/Saturn/Saturn.sv` (compartido con los proyectos MiSTer
+originales en la raíz del repo - `Saturn.qpf`, etc.) instancia `SMPC` y
+`SH1` con rutas de `.mif` escritas como literal `"rtl/..."`, relativas a
+la raíz del repo, que es donde vive el `.qpf` original. Quartus resuelve
+esas rutas relativas al directorio del proyecto - y el nuestro
+(`neptunoplus/Saturn_neptunoplus.qpf`) vive un nivel más abajo, así que
+buscaba en `neptunoplus/rtl/...` y no lo encontraba. Ambos módulos
+(`SMPC` y `SH1`) se instancian sin condición en `Saturn.sv`, así que
+Quartus necesita resolver su `.mif` sí o sí aunque el CD (que usa `SH1`)
+esté fuera de alcance para el Milestone 1.
+
+En vez de editar `rtl/Saturn/Saturn.sv` (lo que rompería el build
+original de MiSTer, que sí necesita la ruta `"rtl/..."` tal cual), se
+agregó en `neptunoplus/Saturn_neptunoplus.qsf`:
+
+```
+set_global_assignment -name SEARCH_PATH ".."
+```
+
+Esto le dice a Quartus que busque también en la raíz del repo, sin tocar
+ningún archivo compartido. De paso también cubre el mismo patrón en
+`neptunoplus/Saturn_MiST.sv` (`E93C45 #("rtl/stv_eeprom.mif")`, el
+EEPROM de STV, también instanciado sin condición).
+
 ### Pendiente
 
-1. Recompilar en Quartus con las dos rondas del barrido de `altdpram`/MLAB
-   aplicadas (incluye ahora `HMCS400_MR`/`HMCS400_STACK` y
-   `SMPC_ERAM`/`SMPC_IREG`/`SMPC_OREG`, que en la ronda anterior se habían
-   dejado sin tocar por error) - candidato fuerte a ser el próximo error
-   es `VDP2_PAL_RAM` si `BIDIR_DUAL_PORT` resulta no ser compatible
-   después de todo.
-2. `debug_uart` sigue sin traerse a este repo (vive en la otra máquina del
+1. Recompilar en Quartus con el `SEARCH_PATH` agregado - si Quartus
+   resuelve el `.mif` buscando `<search_path>/<ruta literal>` (que es el
+   comportamiento esperado), esto debería quedar resuelto. Si no,
+   alternativa a considerar: copiar los `.mif` también bajo
+   `neptunoplus/rtl/...` para que la ruta literal funcione sin
+   `SEARCH_PATH`.
+2. Candidato a ser el siguiente error: `VDP2_PAL_RAM` si `BIDIR_DUAL_PORT`
+   resulta no ser compatible con Cyclone IV GX después de todo (ver nota
+   más arriba).
+3. `debug_uart` sigue sin traerse a este repo (vive en la otra máquina del
    usuario) - hace falta para depurar en hardware real cuando llegue el
    momento; dado que el cuelgue en `0x000000` era específico del diseño con
    CDC ya descartado, hay que confirmar desde cero si el problema
