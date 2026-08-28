@@ -331,36 +331,42 @@ familia y preserva la semántica de lectura asíncrona (necesaria porque
 varios llamadores, como `SH_regfile.sv`, leen el dato de forma
 combinacional en el mismo ciclo).
 
-Detalle interesante encontrado en el camino: varios de estos módulos ya
-tenían una rama `` `ifdef SIM ``/`` `else ``, donde la rama `SIM` era
-exactamente el array de registros correcto y la rama `else` era el
-`altdpram` roto. El truco es que `` `define SIM `` está envuelto en
-comentarios `// synopsys translate_off` / `// synopsys translate_on` -
-pero eso es solo una convención para *simuladores*; Quartus no respeta
-esos comentarios al sintetizar, así que para los módulos donde el
-`` `define SIM `` está definido en el mismo archivo, antes de su propio
-`` `ifdef SIM ``, la macro SÍ está activa también durante la síntesis
-real y la rama "simulación" ya se estaba seleccionando sola. Para esos
-casos no hacía falta tocar nada (se dejaron como estaban); para los
-módulos sin ese guard, o con el `altdpram` totalmente incondicional, se
-aplicó el fix directo.
+Detalle importante encontrado en el camino, y sobre el que en un primer
+momento me equivoqué: varios de estos módulos ya tenían una rama
+`` `ifdef SIM ``/`` `else ``, donde la rama `SIM` era exactamente el
+array de registros correcto y la rama `else` era el `altdpram` roto, con
+el `` `define SIM `` envuelto en comentarios
+`// synopsys translate_off` / `// synopsys translate_on`. Al principio
+asumí que Quartus ignora esos comentarios (que son solo convención para
+simuladores) y por lo tanto la macro quedaría activa también en síntesis
+real, seleccionando sola la rama seguro - así que dejé esos módulos sin
+tocar. **Esto era incorrecto**: la siguiente compilación falló
+exactamente en uno de esos módulos "seguros" (`HMCS400_STACK`), lo que
+demuestra que Quartus sí respeta `synopsys translate_off/on` y descarta
+el `` `define SIM `` de adentro, así que la rama `else` (el `altdpram`
+roto) era la que realmente se estaba sintetizando todo este tiempo. Se
+corrigió eliminando por completo el `` `ifdef SIM ``/`` `else `` en esos
+módulos y dejando solo el array de registros de forma incondicional
+(válido tanto para simulación como para síntesis).
 
-Módulos corregidos: `SH_regram` (`rtl/SH_mem.sv`), `ddr_infifo` y
-`ddr_cache_ram` (`rtl/ddram.sv`), `SCU_CBUS_CACHE` (`rtl/Saturn/SCU/RAM.sv`,
-ya estaba a salvo por el guard pero se dejó explícito), `VDP2_WRITE_FIFO`
+Módulos corregidos (lista completa, tras las dos rondas): `SH_regram`
+(`rtl/SH_mem.sv`), `ddr_infifo` y `ddr_cache_ram` (`rtl/ddram.sv`),
+`SCU_CBUS_CACHE` (`rtl/Saturn/SCU/RAM.sv`), `VDP2_WRITE_FIFO`
 (`rtl/Saturn/VDP2/VDP2_mem.sv`), `SMPC_OREG_RAM`/`SMPC_SMEM`
 (`rtl/Saturn/SMPC_HLE.sv`), `SCSP_KEY_RAM`/`SCSP_STACK_RAM`
 (`rtl/Saturn/SCSP/SCSP.sv`), `VDP1_PAT_FIFO`/`VDP1_COL_TBL`
 (`rtl/Saturn/VDP1/VDP1.sv`), `CACHE_TAG`/`CACHE_VALID`/`CACHE_LRU`
-(`rtl/SH7604_mem.sv`), y `mlab.vhd` (entidad VHDL genérica, sin uso real
-en el diseño pero corregida igual por prudencia).
+(`rtl/SH7604_mem.sv`), `mlab.vhd` (entidad VHDL genérica, sin uso real en
+el diseño pero corregida igual por prudencia), `HMCS400_MR`/
+`HMCS400_STACK` (`rtl/Saturn/SMPC/HMCS400_mem.sv` - `HMCS400_ROM` usa
+`altsyncram` en modo `"ROM"`, que sí es compatible y no se tocó), y
+`SMPC_ERAM`/`SMPC_IREG`/`SMPC_OREG` (`rtl/Saturn/SMPC/SMPC.sv`).
 
-No se tocó (protegidos por su propio `` `define SIM ``/`` `ifdef SIM ``
-local, ya seleccionan la rama segura): `HMCS400_MR`/`HMCS400_STACK`
-(`rtl/Saturn/SMPC/HMCS400_mem.sv` - `HMCS400_ROM` usa `altsyncram` en modo
-`"ROM"`, que sí es compatible), `SMPC_ERAM`/`SMPC_IREG`/`SMPC_OREG`
-(`rtl/Saturn/SMPC/SMPC.sv`), `ADSP_21xx_MEM`/`ADSP_21xx_STACK`
-(`rtl/ADSP_21XX_mem.sv`).
+`ADSP_21xx_STACK` (`rtl/ADSP_21XX_mem.sv`) ya se había corregido
+directamente en la primera ronda (sin depender del guard), así que no
+hizo falta tocarlo de nuevo. `ADSP_21xx_MEM`, el otro módulo del mismo
+archivo, usa `altsyncram` en modo `BIDIR_DUAL_PORT` en su rama `else`
+(la que realmente se sintetiza) - ver el aparte más abajo sobre ese modo.
 
 Confirmado como código muerto (no referenciado por ningún `.qip`, no se
 tocó): `rtl/SH/core/SH_mem.sv` y `rtl/SH/SH7604/SH7604_mem.sv` - son
@@ -370,21 +376,25 @@ raíz (`rtl/SH_mem.sv`, `rtl/SH7604_mem.sv`).
 
 Nota aparte, sin resolver todavía: hay uso de `altsyncram` en modo
 `"BIDIR_DUAL_PORT"` (verdadero dual-puerto, con escritura independiente
-en ambos puertos) en `rtl/bram.vhd`, `rtl/ADSP_21XX_mem.sv` (ya a salvo
-por el guard) y, sin guard, en `VDP2_PAL_RAM`
-(`rtl/Saturn/VDP2/VDP2_mem.sv`). A diferencia de `altdpram`/MLAB, este es
-un caso distinto (`altsyncram`, con dirección de lectura registrada/
-síncrona) que en principio Cyclone IV GX sí soporta de forma nativa vía
-M9K - no se tocó especulativamente para no arriesgar introducir un bug
-nuevo en una RAM de verdadera doble escritura sin evidencia real del
-compilador de que haga falta. Si la próxima compilación falla ahí,
-será la siguiente cosa a investigar.
+en ambos puertos) en `rtl/bram.vhd`, en `ADSP_21xx_MEM`
+(`rtl/ADSP_21XX_mem.sv` - dado el hallazgo de arriba, ésta es la rama que
+realmente se sintetiza, no una alternativa de respaldo) y, sin guard, en
+`VDP2_PAL_RAM` (`rtl/Saturn/VDP2/VDP2_mem.sv`). A diferencia de
+`altdpram`/MLAB, este es un caso distinto (`altsyncram`, con dirección
+de lectura registrada/síncrona) que en principio Cyclone IV GX sí
+soporta de forma nativa vía M9K - no se tocó especulativamente para no
+arriesgar introducir un bug nuevo en una RAM de verdadera doble
+escritura sin evidencia real del compilador de que haga falta. Si la
+próxima compilación falla ahí, será la siguiente cosa a investigar.
 
 ### Pendiente
 
-1. Recompilar en Quartus con el barrido de `altdpram`/MLAB aplicado -
-   candidato fuerte a ser el próximo error es `VDP2_PAL_RAM` si
-   `BIDIR_DUAL_PORT` resulta no ser compatible después de todo.
+1. Recompilar en Quartus con las dos rondas del barrido de `altdpram`/MLAB
+   aplicadas (incluye ahora `HMCS400_MR`/`HMCS400_STACK` y
+   `SMPC_ERAM`/`SMPC_IREG`/`SMPC_OREG`, que en la ronda anterior se habían
+   dejado sin tocar por error) - candidato fuerte a ser el próximo error
+   es `VDP2_PAL_RAM` si `BIDIR_DUAL_PORT` resulta no ser compatible
+   después de todo.
 2. `debug_uart` sigue sin traerse a este repo (vive en la otra máquina del
    usuario) - hace falta para depurar en hardware real cuando llegue el
    momento; dado que el cuelgue en `0x000000` era específico del diseño con
