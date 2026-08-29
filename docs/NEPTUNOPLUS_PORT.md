@@ -559,3 +559,78 @@ que se acaba de corregir. Se agregaron las mismas restricciones de
    momento; dado que el cuelgue en `0x000000` era específico del diseño con
    CDC ya descartado, hay que confirmar desde cero si el problema
    desaparece con este diseño más simple.
+
+## Diagnóstico por dominio de reloj con `report_timing` (via `timing_report.tcl`)
+
+Con el `.sdc` ya corregido (hierarchy prefix + `sdram_clk` en `clk[1]`),
+se agregó `neptunoplus/timing_report.tcl` - un script para
+`quartus_sta -t` que corre `report_timing -detail full_path` sobre los
+peores 5 caminos de cada dominio, sin necesidad de abrir la GUI de
+TimeQuest. Se usó para diagnosticar en qué consistía realmente el slack
+negativo que quedaba tras el fix del `.sdc`:
+
+- **`clk_ram` setup (-1.918 ns)**: los 5 peores caminos son todos
+  `SDRAM_DQ[n]` (pin físico) → `sdram1|rbuf0[n]` (registro de captura),
+  con **1 solo nivel de lógica**. No es profundidad combinacional - es
+  el presupuesto de `-max 6.4 / -min 3.2 ns` del `set_input_delay`
+  (heredado del `.sdc` de referencia de `delgrom/NeoGeo_FPGA` para esta
+  misma placa física) más un skew de reloj negativo de -3.125 ns
+  (`SDRAM_CLK` se genera vía `altddio_out` con más latencia que el
+  registro interno) comiéndose el margen.
+- **`clk_ram` hold (-0.469 ns)**: mismo patrón, en
+  `sdram2_ctrl|SDRAM_DQ[n]~en` → pin físico `SDRAM2_DQ[n]`, 1 nivel de
+  lógica, bus completo afectado por igual.
+- **`clk_sys` setup (-1.660 ns en ese momento)**: acá la historia es
+  distinta - los 5 peores caminos son el mismo par origen→destino
+  repetido, con **26 niveles de lógica combinacional** dentro del core
+  SH7604 (`PIPE.EX.DI.RA.N[0]` → lógica de predicción de rama
+  `BP_A_MAEX`/`BP_A` → sumador de acarreo en cascada de ~14 bits
+  (`Add2~16`...`Add2~44`) → `WideNor5` → cadena de selectores/muxes →
+  comparador `Equal3` → `PIPE.ID.IR[5]`). Profundidad lógica real,
+  heredada tal cual del core de MiSTer - no es un bug de constraint.
+
+Se verificó en `rtl/sdram1.sv` (solo lectura) que `rbuf0 <= SDRAM_DQ;`
+captura **sin condición, en cada flanco de `clk_ram`** - no hay margen
+de varios ciclos en ese registro, así que un `set_multicycle_path` ahí
+sería mentirle a TimeQuest sobre el comportamiento real del RTL.
+Decisión: **no tocar RTL** (el core ya está probado funcionando en
+MiSTer) y no adivinar valores de datasheet sin evidencia real del chip
+de SDRAM montado en la placa - los violations de `clk_ram` quedan como
+límite conocido, no como bug a corregir a ciegas.
+
+## Limpieza de `.sdc`: false-path en I/O físicamente asíncrona (sin tocar RTL)
+
+Lo único que sí era corregible sin RTL y sin datos de datasheet: varios
+puertos físicos estaban compitiendo por presupuesto de timing contra
+`sys_clk` sin tener ningún receptor síncrono real -
+`AUDIO_L`/`AUDIO_R` (DAC analógico vía filtro RC externo), `LED`
+(discreto), `VGA_*` (monitor/scaler externo) y `UART_TX` (periférico
+externo asíncrono) tenían un `set_output_delay` arbitrario de 1 ns.
+Se reemplazó por `set_false_path -to`. También se declararon
+`JOY_DATA`/`JOY_XLOAD` (cadena de joystick del DB9, asíncrona por
+diseño) como `set_false_path -from` - `JOY_XDATA` ya queda cubierto
+porque es un passthrough combinacional puro de `JOY_DATA`
+(`assign JOY_XDATA = JOY_DATA;` en `neptuno2_top.sv`). De paso se quitó
+el `set_multicycle_path` que había en `VGA_*`, ya redundante con el
+false path.
+
+Resultado al recompilar: `clk_ram` quedó **exactamente igual** (esperado -
+esos pines no comparten dominio con la SDRAM), pero `clk_sys` mejoró de
+**-1.660 ns a -0.910 ns** de slack de setup peor caso, sin tocar RTL.
+Confirma que liberar al Fitter de restricciones falsas en pines sin
+relación con el critical path real le dio más margen de colocación/rutado
+también para los caminos que sí importan (el mismo camino del predictor
+de rama del SH7604 sigue siendo el peor, solo que ahora en otros bits de
+`PIPE.ID.IR`).
+
+### Estado actual y siguiente paso
+
+Con las vías de corrección puramente `.sdc`/sin-RTL agotadas por ahora
+(los violations de `clk_ram` requieren datasheet real del chip de SDRAM
+o tocar `sdram1.sv`; el de `clk_sys` requiere re-segmentar lógica del
+SH7604), y dado que en un intento anterior (arquitectura distinta, con
+`clk_ram2`/CDC, en otra sesión) se llegó a timing completamente cerrado
+**sin llegar a tener video**, se decidió no seguir persiguiendo cierre
+de timing como condición previa a probar en hardware - timing cerrado
+ya demostró no ser garantía de nada por sí solo. Queda pendiente
+conseguir un adaptador VGA→HDMI para las pruebas en la placa real.
